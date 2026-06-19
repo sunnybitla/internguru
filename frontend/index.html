@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Job & Internship Application Agent</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-robot-astronaut"></i>
+                </div>
+                <h2>JobAgent<span>.ai</span></h2>
+            </div>
+            <nav class="nav-menu">
+                <a href="#dashboard" class="nav-item active" id="nav-dashboard">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#finder" class="nav-item" id="nav-finder">
+                    <i class="fa-solid fa-briefcase"></i>
+                    <span>Job Finder</span>
+                </a>
+                <a href="#queue" class="nav-item" id="nav-queue">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Auto-Apply Queue</span>
+                    <span class="badge" id="queue-badge">0</span>
+                </a>
+                <a href="#history" class="nav-item" id="nav-history">
+                    <i class="fa-solid fa-history"></i>
+                    <span>History Logs</span>
+                </a>
+                <a href="#settings" class="nav-item" id="nav-settings">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span>Profile & Settings</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span>Agent Daemon Ready</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="page-title">
+                    <h1 id="current-page-title">Dashboard</h1>
+                    <p id="current-page-subtitle">Welcome back, check your application metrics.</p>
+                </div>
+                <div class="user-profile-summary">
+                    <div class="user-avatar" id="avatar-letters">US</div>
+                    <div class="user-info">
+                        <h4 id="user-display-name">Guest User</h4>
+                        <p id="user-display-email">No profile configured</p>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Pages Sections -->
+            <div class="content-wrapper">
+                <!-- Dashboard Section -->
+                <section id="page-dashboard" class="page-section active">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon applied"><i class="fa-solid fa-paper-plane"></i></div>
+                            <div class="stat-details">
+                                <span class="stat-label">Total Applied</span>
+                                <h3 class="stat-number" id="stat-total-applied">0</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon queued"><i class="fa-solid fa-clock"></i></div>
+                            <div class="stat-details">
+                                <span class="stat-label">Queued (Mon)</span>
+                                <h3 class="stat-number" id="stat-queued-count">0</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon manual"><i class="fa-solid fa-keyboard"></i></div>
+                            <div class="stat-details">
+                                <span class="stat-label">Requires Action</span>
+                                <h3 class="stat-number" id="stat-manual-action">0</h3>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success"><i class="fa-solid fa-circle-check"></i></div>
+                            <div class="stat-details">
+                                <span class="stat-label">Success Rate</span>
+                                <h3 class="stat-number" id="stat-success-rate">0%</h3>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-split">
+                        <div class="card main-card">
+                            <div class="card-header">
+                                <h3>Next Scheduled Execution Run</h3>
+                                <span class="run-time-badge" id="next-run-badge">Monday, 09:00 AM</span>
+                            </div>
+                            <div class="next-run-box">
+                                <div class="run-info">
+                                    <i class="fa-regular fa-calendar-check run-icon"></i>
+                                    <div>
+                                        <h4>Monday Morning Automations</h4>
+                                        <p>The agent will process all jobs currently in your queue, generate customized cover letters, and submit them automatically.</p>
+                                    </div>
+                                </div>
+                                <div class="run-actions">
+                                    <button class="btn btn-secondary" id="btn-sync-now-dashboard">
+                                        <i class="fa-solid fa-rotate"></i> Sync Jobs Now
+                                    </button>
+                                    <button class="btn btn-primary" id="btn-trigger-now">
+                                        <i class="fa-solid fa-play"></i> Trigger Queue Run Now
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card secondary-card">
+                            <div class="card-header">
+                                <h3>Quick Queue Overview</h3>
+                                <a href="#queue" class="view-all-link">View All</a>
+                            </div>
+                            <div class="quick-list" id="quick-queue-list">
+                                <div class="empty-state">No jobs in queue. Go to <a href="#finder">Job Finder</a> to search.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Job Finder Section -->
+                <section id="page-finder" class="page-section">
+                    <div class="filter-bar">
+                        <div class="search-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="search-input" placeholder="Search title, company, skills, or location...">
+                        </div>
+                        <div class="filter-controls">
+                            <select id="type-filter">
+                                <option value="all">All Postings</option>
+                                <option value="jobs">Jobs Only</option>
+                                <option value="internships">Internships Only</option>
+                            </select>
+                            <button class="btn btn-secondary" id="btn-sync-jobs">
+                                <i class="fa-solid fa-rotate" id="sync-icon"></i> Sync Latest Jobs
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="jobs-grid" id="jobs-grid">
+                        <div class="loading-state"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading latest postings...</div>
+                    </div>
+                </section>
+
+                <!-- Queue Section -->
+                <section id="page-queue" class="page-section">
+                    <div class="queue-container">
+                        <div class="queue-list-panel">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3>Queued Applications (<span id="queue-count-heading">0</span>)</h3>
+                                </div>
+                                <div class="queue-items-wrapper" id="queue-items-list">
+                                    <div class="empty-state">No jobs currently in the auto-apply queue.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="cover-letter-panel" id="cover-letter-editor-container" style="display: none;">
+                            <div class="card editor-card">
+                                <div class="card-header editor-header">
+                                    <div>
+                                        <h3>Tailored Cover Letter</h3>
+                                        <p id="editor-job-title">Select an item from the list to review</p>
+                                    </div>
+                                    <button class="btn btn-success btn-sm" id="btn-save-cover-letter">
+                                        <i class="fa-solid fa-floppy-disk"></i> Save Letter
+                                    </button>
+                                </div>
+                                <div class="editor-body">
+                                    <textarea id="cover-letter-textarea" placeholder="Edit cover letter here..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- History Logs Section -->
+                <section id="page-history" class="page-section">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Application Logs</h3>
+                            <button class="btn btn-danger btn-sm" id="btn-clear-history">
+                                <i class="fa-solid fa-trash-can"></i> Clear History Logs
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Role / Company</th>
+                                        <th>Date Handled</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Action / Error details</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-table-body">
+                                    <tr>
+                                        <td colspan="5" class="empty-table-state">No application history found.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings Section -->
+                <section id="page-settings" class="page-section">
+                    <div class="settings-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Candidate Profile Info</h3>
+                            </div>
+                            <form id="profile-form" class="settings-form" enctype="multipart/form-data">
+                                <div class="form-row-double">
+                                    <div class="form-group">
+                                        <label for="profile-name">Full Name</label>
+                                        <input type="text" id="profile-name" required placeholder="John Doe">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="profile-email">Email Address</label>
+                                        <input type="email" id="profile-email" required placeholder="john.doe@example.com">
+                                    </div>
+                                </div>
+                                <div class="form-row-double">
+                                    <div class="form-group">
+                                        <label for="profile-phone">Phone Number</label>
+                                        <input type="text" id="profile-phone" placeholder="+1-123-456-7890">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="profile-linkedin">LinkedIn Profile URL</label>
+                                        <input type="url" id="profile-linkedin" required placeholder="https://linkedin.com/in/username">
+                                    </div>
+                                </div>
+                                <div class="form-row-double">
+                                    <div class="form-group">
+                                        <label for="profile-github">GitHub URL (Optional)</label>
+                                        <input type="url" id="profile-github" placeholder="https://github.com/username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="profile-portfolio">Portfolio / Website (Optional)</label>
+                                        <input type="url" id="profile-portfolio" placeholder="https://myportfolio.com">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Resume Upload (PDF Format)</label>
+                                    <div class="dropzone" id="resume-dropzone">
+                                        <input type="file" id="resume-file-input" accept=".pdf" style="display: none;">
+                                        <div class="dropzone-prompt">
+                                            <i class="fa-solid fa-file-pdf dropzone-icon"></i>
+                                            <p>Drag & drop your resume PDF here, or <span>browse files</span></p>
+                                            <span class="file-info" id="resume-file-info">No file uploaded</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="profile-gemini-key">Gemini API Key (Optional - for tailored cover letters)</label>
+                                    <input type="password" id="profile-gemini-key" placeholder="Enter API Key (starts with AIza...)">
+                                    <small class="help-text">Saved locally on your machine. Enables the agent to generate highly customized cover letters matching your skills directly to job roles.</small>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary" id="btn-save-profile">
+                                    <i class="fa-solid fa-floppy-disk"></i> Save Profile Details
+                                </button>
+                            </form>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Agent Schedule & Background Service</h3>
+                            </div>
+                            <div class="settings-form">
+                                <div class="form-group">
+                                    <label for="schedule-time">Monday Morning Application Time</label>
+                                    <div class="time-input-group">
+                                        <input type="time" id="schedule-time" value="09:00">
+                                        <span class="help-text">Sets when the automation runs every Monday morning.</span>
+                                    </div>
+                                </div>
+                                
+                                <hr class="settings-divider">
+                                
+                                <div class="daemon-control-box">
+                                    <div class="daemon-description">
+                                        <h4>Windows Task Scheduler Daemon</h4>
+                                        <p>Enable this toggle to register a background task in Windows. This allows the job application run to execute automatically on Monday morning even if you close this dashboard window.</p>
+                                    </div>
+                                    <div class="switch-container">
+                                        <label class="switch">
+                                            <input type="checkbox" id="daemon-toggle-switch">
+                                            <span class="slider round"></span>
+                                        </label>
+                                        <span id="daemon-status-text" class="status-label-off">Disabled</span>
+                                    </div>
+                                </div>
+                                
+                                <hr class="settings-divider">
+                                
+                                <div class="daemon-control-box">
+                                    <div class="daemon-description">
+                                        <h4>Dry Run Mode (Safe Testing)</h4>
+                                        <p>Enable this toggle to simulate job applications to Greenhouse and Lever without submitting actual emails or resumes to recruiters.</p>
+                                    </div>
+                                    <div class="switch-container">
+                                        <label class="switch">
+                                            <input type="checkbox" id="dry-run-switch" checked>
+                                            <span class="slider round"></span>
+                                        </label>
+                                        <span id="dry-run-status-text" class="status-label-on">Enabled</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Job Details Modal -->
+    <div class="modal" id="job-details-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-company-info">
+                    <img src="" id="modal-company-logo" alt="Logo" onerror="this.src='https://placehold.co/40x40/5A67D8/FFFFFF?text='+this.dataset.char">
+                    <div>
+                        <h2 id="modal-job-title">Job Title</h2>
+                        <p id="modal-company-location">Company • Location</p>
+                    </div>
+                </div>
+                <button class="close-modal-btn" id="btn-close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-badge-row">
+                    <span class="job-badge source" id="modal-badge-source">Source</span>
+                    <span class="job-badge type" id="modal-badge-type">Type</span>
+                    <span class="job-badge date" id="modal-badge-date">Date</span>
+                </div>
+                <div class="job-description-content" id="modal-job-description">
+                    <!-- HTML description injected here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modal-btn-view-original">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> View Posting
+                </button>
+                <button class="btn btn-primary" id="modal-btn-queue">
+                    <i class="fa-solid fa-clock"></i> Queue for Monday Apply
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">Successfully saved profile details</div>
+    <script src="app.js"></script>
+</body>
+</html>
