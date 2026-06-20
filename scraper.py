@@ -1,8 +1,11 @@
 import urllib.request
+import urllib.parse
 import json
 import re
 from datetime import datetime
+from bs4 import BeautifulSoup
 import database
+
 
 def clean_html(raw_html):
     """
@@ -186,6 +189,73 @@ def fetch_lever_jobs(companies=["zoox"]):
             print(f"Error fetching Lever jobs for {company}: {e}")
     return jobs_normalized
 
+def fetch_linkedin_guest_jobs(keywords="software intern", location="United States", limit=25):
+    """
+    Scrapes LinkedIn's public guest job postings without API keys.
+    """
+    kw_encoded = urllib.parse.quote(keywords)
+    loc_encoded = urllib.parse.quote(location)
+    
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={kw_encoded}&location={loc_encoded}&start=0"
+    
+    jobs_normalized = []
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read().decode('utf-8')
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            job_cards = soup.find_all('li')
+            for card in job_cards[:limit]:
+                # Extract Job ID
+                entity_urn = card.find('div', {'class': 'base-card'})
+                if not entity_urn or not entity_urn.has_attr('data-entity-urn'):
+                    continue
+                urn_val = entity_urn['data-entity-urn']
+                job_id = f"linkedin_{urn_val.split(':')[-1]}"
+                
+                # Extract Title
+                title_elem = card.find('h3', {'class': 'base-search-card__title'})
+                title = title_elem.text.strip() if title_elem else "Software Engineer"
+                
+                # Extract Company
+                company_elem = card.find('a', {'class': 'hidden-nested-link'}) or card.find('h4', {'class': 'base-search-card__subtitle'})
+                company = company_elem.text.strip() if company_elem else "Unknown Company"
+                
+                # Extract Location
+                loc_elem = card.find('span', {'class': 'job-search-card__location'})
+                job_location = loc_elem.text.strip() if loc_elem else location
+                
+                # Extract URL
+                url_elem = card.find('a', {'class': 'base-card__full-link'})
+                job_url = url_elem['href'].split('?')[0] if url_elem else ""
+                
+                # Description snippet
+                description = f"LinkedIn Job Posting for {title} at {company} in {job_location}."
+                
+                is_intern = is_internship_check(title, description)
+                
+                jobs_normalized.append({
+                    "id": job_id,
+                    "title": title,
+                    "company": company,
+                    "company_logo": "",
+                    "url": job_url,
+                    "location": job_location,
+                    "source": "LinkedIn (Guest)",
+                    "description": description,
+                    "pub_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "is_internship": is_intern
+                })
+    except Exception as e:
+        print(f"Error scraping LinkedIn: {e}")
+        
+    return jobs_normalized
+
 def sync_jobs():
     """
     Fetches latest jobs from all sources, standardizes them, and saves to database cache.
@@ -196,8 +266,9 @@ def sync_jobs():
     remotive_jobs = fetch_remotive_jobs(limit=50)
     greenhouse_jobs = fetch_greenhouse_jobs()
     lever_jobs = fetch_lever_jobs()
+    linkedin_jobs = fetch_linkedin_guest_jobs(keywords="software intern", location="United States")
     
-    all_jobs = jobicy_jobs + remotive_jobs + greenhouse_jobs + lever_jobs
+    all_jobs = jobicy_jobs + remotive_jobs + greenhouse_jobs + lever_jobs + linkedin_jobs
     if all_jobs:
         database.save_jobs(all_jobs)
         return len(all_jobs)
