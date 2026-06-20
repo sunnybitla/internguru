@@ -2,7 +2,9 @@ import sqlite3
 import os
 import json
 
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.db")
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_FILE = os.path.join(DATA_DIR, "data.db")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)

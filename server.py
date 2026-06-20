@@ -124,7 +124,8 @@ async def update_profile_api(
             raise HTTPException(status_code=400, detail="Only PDF resumes are supported.")
             
         saved_name = "resume.pdf"
-        target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), saved_name)
+        data_dir = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+        target_path = os.path.join(data_dir, saved_name)
         
         with open(target_path, "wb") as buffer:
             shutil.copyfileobj(resume.file, buffer)

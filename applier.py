@@ -95,7 +95,8 @@ def apply_lever(company, posting_id, profile, cover_letter):
     
     # Check resume file
     resume_filename = profile.get('resume_filename', '')
-    resume_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), resume_filename) if resume_filename else None
+    data_dir = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+    resume_path = os.path.join(data_dir, resume_filename) if resume_filename else None
     
     if not resume_path or not os.path.exists(resume_path):
         return False, "Resume file not found. Please upload a resume first."
@@ -148,7 +149,8 @@ def apply_greenhouse(company, job_id, profile, cover_letter):
     url = f"https://boards.greenhouse.io/{company}/jobs/{job_id}/apply"
     
     resume_filename = profile.get('resume_filename', '')
-    resume_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), resume_filename) if resume_filename else None
+    data_dir = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+    resume_path = os.path.join(data_dir, resume_filename) if resume_filename else None
     
     if not resume_path or not os.path.exists(resume_path):
         return False, "Resume file not found. Please upload a resume first."

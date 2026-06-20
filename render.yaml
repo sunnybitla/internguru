@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ai-job-applier-agent
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DATA_DIR
+        value: /data
+      # Add other environment variables here if needed
+      # - key: GEMINI_API_KEY
+      #   value: your-api-key-here
+    # NOTE: Persistent disks require a paid plan on Render (Starter or above).
+    # If you upgrade to a paid plan, uncomment the disk block below to persist your SQLite database and resume.
+    # disk:
+    #   name: sqlite-data
+    #   mountPath: /data
+    #   sizeGB: 1
