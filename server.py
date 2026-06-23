@@ -352,18 +352,29 @@ def toggle_daemon_api(toggle: DaemonToggle, current_user = Depends(get_current_u
             # Fall back to system python if venv python doesn't exist yet (though it should)
             venv_python = "python"
             
-        command = f'schtasks /create /tn "{task_name}" /tr "\'{venv_python}\' \'{script_path}\' {user_id}" /sc weekly /d MON /st {time_str} /f'
+        cmd = [
+            "schtasks", "/create",
+            "/tn", task_name,
+            "/tr", f"'{venv_python}' '{script_path}' {user_id}",
+            "/sc", "weekly",
+            "/d", "MON",
+            "/st", time_str,
+            "/f"
+        ]
         try:
-            # Run schtasks via PowerShell/CMD
-            result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=1)
             return {"status": "success", "message": "Windows Task Scheduled successfully", "output": result.stdout}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to register Windows Scheduled Task: {str(e)}")
+            # Retrieve stderr for richer error reports
+            error_msg = str(e)
+            if hasattr(e, 'stderr') and e.stderr:
+                error_msg += f" (stderr: {e.stderr})"
+            raise HTTPException(status_code=500, detail=f"Failed to register Windows Scheduled Task: {error_msg}")
     else:
-        command = f'schtasks /delete /tn "{task_name}" /f'
+        cmd = ["schtasks", "/delete", "/tn", task_name, "/f"]
         try:
-            result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True)
             database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=0)
             return {"status": "success", "message": "Windows Task unregistered successfully", "output": result.stdout}
         except Exception as e:
