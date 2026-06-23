@@ -251,8 +251,8 @@
                                         <input type="text" id="profile-phone" placeholder="+1-123-456-7890">
                                     </div>
                                     <div class="form-group">
-                                        <label for="profile-linkedin">LinkedIn Profile URL</label>
-                                        <input type="url" id="profile-linkedin" required placeholder="https://linkedin.com/in/username">
+                                        <label for="profile-linkedin">LinkedIn Profile URL (Optional)</label>
+                                        <input type="url" id="profile-linkedin" placeholder="https://linkedin.com/in/username">
                                     </div>
                                 </div>
                                 <div class="form-row-double">
@@ -282,6 +282,12 @@
                                     <label for="profile-gemini-key">Gemini API Key (Optional - for tailored cover letters)</label>
                                     <input type="password" id="profile-gemini-key" placeholder="Enter API Key (starts with AIza...)">
                                     <small class="help-text">Saved locally on your machine. Enables the agent to generate highly customized cover letters matching your skills directly to job roles.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="profile-linkedin-key">LinkedIn API Key (Optional - for automated Easy Apply)</label>
+                                    <input type="password" id="profile-linkedin-key" placeholder="Enter LinkedIn API Key (starts with ln-...)">
+                                    <small class="help-text">Saved locally. Enables the agent to automatically apply to LinkedIn and non-ATS jobs directly, bypassing manual application requirements.</small>
                                 </div>
 
                                 <button type="submit" class="btn btn-primary" id="btn-save-profile">

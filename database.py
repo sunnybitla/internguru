@@ -28,24 +28,27 @@ def init_db():
         resume_filename TEXT,
         resume_text TEXT,
         gemini_api_key TEXT,
+        linkedin_api_key TEXT DEFAULT '',
         windows_daemon_enabled INTEGER DEFAULT 0,
         monday_time TEXT DEFAULT '09:00',
         dry_run INTEGER DEFAULT 1
     )
     """)
     
-    # Migrate existing table if dry_run column is missing
+    # Migrate existing table if columns are missing
     cursor.execute("PRAGMA table_info(profile)")
     columns = [col[1] for col in cursor.fetchall()]
     if 'dry_run' not in columns:
         cursor.execute("ALTER TABLE profile ADD COLUMN dry_run INTEGER DEFAULT 1")
+    if 'linkedin_api_key' not in columns:
+        cursor.execute("ALTER TABLE profile ADD COLUMN linkedin_api_key TEXT DEFAULT ''")
     
     # Insert default profile row if not exists
     cursor.execute("SELECT COUNT(*) FROM profile")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
-        INSERT INTO profile (name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename, resume_text, gemini_api_key, windows_daemon_enabled, monday_time, dry_run)
-        VALUES ('', '', '', '', '', '', '', '', '', 0, '09:00', 1)
+        INSERT INTO profile (name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename, resume_text, gemini_api_key, linkedin_api_key, windows_daemon_enabled, monday_time, dry_run)
+        VALUES ('', '', '', '', '', '', '', '', '', '', 0, '09:00', 1)
         """)
 
     # Jobs cache table
@@ -103,7 +106,7 @@ def get_profile():
         return dict(profile)
     return None
 
-def update_profile(name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename=None, resume_text=None, gemini_api_key=None, windows_daemon_enabled=None, monday_time=None, dry_run=None):
+def update_profile(name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename=None, resume_text=None, gemini_api_key=None, linkedin_api_key=None, windows_daemon_enabled=None, monday_time=None, dry_run=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -121,6 +124,7 @@ def update_profile(name, email, phone, linkedin_url, github_url, portfolio_url, 
         "resume_filename": resume_filename,
         "resume_text": resume_text,
         "gemini_api_key": gemini_api_key,
+        "linkedin_api_key": linkedin_api_key,
         "windows_daemon_enabled": windows_daemon_enabled,
         "monday_time": monday_time,
         "dry_run": dry_run
@@ -257,5 +261,20 @@ def clear_history():
     conn.commit()
     conn.close()
 
+def update_job_details(job_id, url, description):
+    """
+    Updates the cached URL and description for a job after resolving LinkedIn details.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE jobs_cache
+    SET url = ?, description = ?
+    WHERE id = ?
+    """, (url, description, job_id))
+    conn.commit()
+    conn.close()
+
 # Initialize on import
 init_db()
+

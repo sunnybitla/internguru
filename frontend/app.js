@@ -98,6 +98,7 @@ const DOM = {
     profileGithub: document.getElementById('profile-github'),
     profilePortfolio: document.getElementById('profile-portfolio'),
     profileGeminiKey: document.getElementById('profile-gemini-key'),
+    profileLinkedinKey: document.getElementById('profile-linkedin-key'),
     resumeDropzone: document.getElementById('resume-dropzone'),
     resumeFileInput: document.getElementById('resume-file-input'),
     resumeFileInfo: document.getElementById('resume-file-info'),
@@ -476,6 +477,7 @@ function loadSettings() {
             
             // Masked Gemini key will show sk-... if exists
             DOM.profileGeminiKey.value = profile.gemini_api_key || '';
+            DOM.profileLinkedinKey.value = profile.linkedin_api_key || '';
             DOM.scheduleTime.value = profile.monday_time || '09:00';
             
             // Update file display info
@@ -622,6 +624,7 @@ DOM.profileForm.addEventListener('submit', (e) => {
     formData.append('github_url', DOM.profileGithub.value);
     formData.append('portfolio_url', DOM.profilePortfolio.value);
     formData.append('gemini_api_key', DOM.profileGeminiKey.value);
+    formData.append('linkedin_api_key', DOM.profileLinkedinKey.value);
     formData.append('monday_time', DOM.scheduleTime.value);
     
     if (DOM.resumeFileInput.files[0]) {

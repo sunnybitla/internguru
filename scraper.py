@@ -256,6 +256,62 @@ def fetch_linkedin_guest_jobs(keywords="software intern", location="United State
         
     return jobs_normalized
 
+def resolve_linkedin_job(job_id):
+    """
+    Fetches the detailed LinkedIn guest job page to resolve the actual description
+    and external application link (e.g., Lever/Greenhouse) if available.
+    """
+    numeric_id = job_id.split('_')[-1] if '_' in job_id else job_id
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{numeric_id}"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read().decode('utf-8')
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Extract description
+            desc_div = soup.find('div', {'class': 'description__text'}) or soup.find('section', {'class': 'description'})
+            description = desc_div.text.strip() if desc_div else None
+            
+            # Extract apply link
+            apply_url = None
+            apply_button = soup.find('a', class_=re.compile(r'apply-button', re.I)) or soup.find('button', class_=re.compile(r'apply-button', re.I))
+            if apply_button and apply_button.name == 'a' and apply_button.has_attr('href'):
+                apply_url = apply_button['href']
+                
+            if not apply_url:
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if "externalApply" in href:
+                        apply_url = href
+                        break
+                        
+            if not apply_url:
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if "lever.co" in href or "greenhouse.io" in href:
+                        apply_url = href
+                        break
+                        
+            resolved_url = None
+            if apply_url:
+                parsed_url = urllib.parse.urlparse(apply_url)
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+                if 'url' in query_params:
+                    resolved_url = query_params['url'][0]
+                else:
+                    resolved_url = apply_url
+                    
+            return resolved_url, description
+    except Exception as e:
+        print(f"Error resolving LinkedIn job {job_id}: {e}")
+        return None, None
+
 def sync_jobs():
     """
     Fetches latest jobs from all sources, standardizes them, and saves to database cache.

@@ -87,10 +87,12 @@ class DryRunToggle(BaseModel):
 def get_profile_api():
     profile = database.get_profile()
     if profile:
-        # Mask Gemini API Key for security
+        # Mask API Keys for security
         p_dict = dict(profile)
         if p_dict.get('gemini_api_key'):
             p_dict['gemini_api_key'] = "sk-..." + p_dict['gemini_api_key'][-4:] if len(p_dict['gemini_api_key']) > 4 else "sk-..."
+        if p_dict.get('linkedin_api_key'):
+            p_dict['linkedin_api_key'] = "ln-..." + p_dict['linkedin_api_key'][-4:] if len(p_dict['linkedin_api_key']) > 4 else "ln-..."
         return p_dict
     return {}
 
@@ -103,16 +105,22 @@ async def update_profile_api(
     github_url: str = Form(""),
     portfolio_url: str = Form(""),
     gemini_api_key: str = Form(""),
+    linkedin_api_key: str = Form(""),
     monday_time: str = Form("09:00"),
     resume: Optional[UploadFile] = File(None)
 ):
     profile = database.get_profile()
     current_key = profile.get('gemini_api_key', '') if profile else ''
+    current_linkedin_key = profile.get('linkedin_api_key', '') if profile else ''
     
     # If the user submitted a masked key, don't overwrite the actual key
     api_key_to_save = gemini_api_key
     if gemini_api_key.startswith("sk-..."):
         api_key_to_save = current_key
+
+    linkedin_key_to_save = linkedin_api_key
+    if linkedin_api_key.startswith("ln-..."):
+        linkedin_key_to_save = current_linkedin_key
 
     resume_filename = None
     resume_text = None
@@ -147,6 +155,7 @@ async def update_profile_api(
         resume_filename=resume_filename,
         resume_text=resume_text,
         gemini_api_key=api_key_to_save,
+        linkedin_api_key=linkedin_key_to_save,
         monday_time=monday_time
     )
     
@@ -176,6 +185,19 @@ def add_to_queue_api(item: QueueItem):
         raise HTTPException(status_code=404, detail="Job not found in cache.")
         
     profile = database.get_profile()
+    
+    # 1. Resolve LinkedIn job details lazily if this is a LinkedIn job
+    if job['url'].startswith("https://www.linkedin.com/") or job['url'].startswith("https://linkedin.com/") or "linkedin_" in job['id']:
+        print(f"Resolving LinkedIn job details lazily for {job['id']}...")
+        resolved_url, resolved_desc = scraper.resolve_linkedin_job(job['id'])
+        if resolved_url or resolved_desc:
+            updated_url = resolved_url or job['url']
+            updated_desc = resolved_desc or job['description']
+            database.update_job_details(job['id'], updated_url, updated_desc)
+            # Update local variables for cover letter generation and queueing
+            job['url'] = updated_url
+            job['description'] = updated_desc
+            print(f"Successfully resolved LinkedIn job details. New URL: {updated_url}")
     
     # Generate cover letter if none provided
     cover_letter = item.cover_letter
