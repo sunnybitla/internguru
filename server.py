@@ -18,6 +18,7 @@ import database
 import scraper
 import parser
 import applier
+import requests
 
 app = FastAPI(title="AI Job Applier Agent")
 
@@ -132,6 +133,15 @@ class AuthRequest(BaseModel):
     username: str
     password: str
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
+@app.get("/api/auth/config")
+def get_auth_config():
+    return {
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "100000000000-placeholder.apps.googleusercontent.com")
+    }
+
 @app.post("/api/auth/register")
 def register(req: AuthRequest):
     if len(req.username.strip()) < 3 or len(req.password.strip()) < 4:
@@ -156,6 +166,64 @@ def login(req: AuthRequest):
         
     token = create_token(user['id'])
     return {"status": "success", "token": token, "username": req.username}
+
+@app.post("/api/auth/google")
+def google_auth(req: GoogleAuthRequest):
+    # Call Google's tokeninfo API to verify the ID Token
+    tokeninfo_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={req.credential}"
+    try:
+        response = requests.get(tokeninfo_url, timeout=10)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reach Google verification server: {str(e)}")
+        
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail="Invalid Google credential token.")
+        
+    token_data = response.json()
+    
+    # Verify the audience (client_id) if configured
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    if google_client_id:
+        token_aud = token_data.get("aud", "")
+        if token_aud != google_client_id:
+            raise HTTPException(status_code=400, detail="Google token client ID mismatch.")
+            
+    # Extract user details
+    google_id = token_data.get("sub")
+    email = token_data.get("email", "")
+    name = token_data.get("name", "")
+    
+    if not google_id:
+        raise HTTPException(status_code=400, detail="Google authentication failed (sub missing).")
+        
+    # Pattern for Google user: "google:{sub}"
+    username = f"google:{google_id}"
+    user = database.get_user_by_username(username)
+    
+    if not user:
+        # Generate a random password not used for logins
+        import secrets
+        random_password = secrets.token_hex(16)
+        success, user_id = database.create_user(username, random_password)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create user account for Google profile.")
+            
+        # Initialize profile with Google details
+        database.update_profile(
+            user_id=user_id,
+            name=name,
+            email=email,
+            phone="",
+            linkedin_url="",
+            github_url="",
+            portfolio_url=""
+        )
+    else:
+        user_id = user['id']
+        
+    # Generate app JWT session token
+    token = create_token(user_id)
+    return {"status": "success", "token": token, "username": username}
 
 # API Routes
 @app.get("/api/profile")

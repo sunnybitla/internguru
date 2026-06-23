@@ -77,7 +77,16 @@ const API = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
-    })
+    }),
+    getAuthConfig: () => fetch('/api/auth/config').then(r => r.json()),
+    googleLogin: (credential) => fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential })
+    }).then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(data.detail || 'Google sign-in failed');
+        return data;
+    }))
 };
 
 // UI Elements
@@ -973,10 +982,55 @@ DOM.btnLogout.addEventListener('click', () => {
     showToast("Logged out successfully!");
 });
 
+// Google Credential Callback
+function handleGoogleCredentialResponse(response) {
+    if (!response.credential) return;
+    
+    DOM.btnAuthSubmit.disabled = true;
+    const submitText = DOM.btnAuthSubmit.innerHTML;
+    DOM.btnAuthSubmit.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
+    
+    API.googleLogin(response.credential).then(res => {
+        if (res.status === 'success') {
+            state.token = res.token;
+            state.username = res.username;
+            localStorage.setItem('token', res.token);
+            localStorage.setItem('username', res.username);
+            
+            showToast("Logged in with Google successfully!");
+            checkAuthState();
+            routeSPA();
+        } else {
+            showToast(res.message || "Google Authentication failed.", true);
+        }
+    }).catch(err => {
+        showToast(err.message || "An error occurred during Google authentication.", true);
+    }).finally(() => {
+        DOM.btnAuthSubmit.disabled = false;
+        DOM.btnAuthSubmit.innerHTML = submitText;
+    });
+}
+
 // Startup Helpers
 window.addEventListener('hashchange', routeSPA);
 window.addEventListener('DOMContentLoaded', () => {
     routeSPA();
+    
+    // Fetch auth config and initialize Google Sign-In
+    API.getAuthConfig().then(config => {
+        const btnContainer = document.getElementById("google-signin-btn-container");
+        if (config.google_client_id && typeof google !== 'undefined' && btnContainer) {
+            google.accounts.id.initialize({
+                client_id: config.google_client_id,
+                callback: handleGoogleCredentialResponse
+            });
+            google.accounts.id.renderButton(
+                btnContainer,
+                { theme: "outline", size: "large", width: 280, text: "signin_with" }
+            );
+        }
+    }).catch(err => console.error("Error loading auth config:", err));
+    
     // Load initial counts for badge if authenticated
     if (state.token) {
         API.getQueue().then(q => DOM.queueBadge.innerText = q.length).catch(() => {});
