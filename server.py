@@ -330,12 +330,6 @@ def toggle_dry_run_api(toggle: DryRunToggle, current_user = Depends(get_current_
 @app.post("/api/toggle-daemon")
 def toggle_daemon_api(toggle: DaemonToggle, current_user = Depends(get_current_user)):
     user_id = current_user['id']
-    if platform.system() != 'Windows':
-        raise HTTPException(
-            status_code=400, 
-            detail="Windows Task Scheduler is only supported on Windows. On cloud/Linux deployments, the process-level background scheduler will run automatically while the server is active."
-        )
-        
     profile = database.get_profile(user_id)
     if not profile:
         raise HTTPException(status_code=400, detail="Profile not configured")
@@ -365,6 +359,11 @@ def toggle_daemon_api(toggle: DaemonToggle, current_user = Depends(get_current_u
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=1)
             return {"status": "success", "message": "Windows Task Scheduled successfully", "output": result.stdout}
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400,
+                detail="Windows Task Scheduler (schtasks) is not available on this platform. On cloud/Linux/Docker deployments, the process-level background scheduler will run automatically while the server is active."
+            )
         except Exception as e:
             # Retrieve stderr for richer error reports
             error_msg = str(e)
@@ -374,9 +373,14 @@ def toggle_daemon_api(toggle: DaemonToggle, current_user = Depends(get_current_u
     else:
         cmd = ["schtasks", "/delete", "/tn", task_name, "/f"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=0)
             return {"status": "success", "message": "Windows Task unregistered successfully", "output": result.stdout}
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400,
+                detail="Windows Task Scheduler (schtasks) is not available on this platform."
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to unregister Windows Scheduled Task: {str(e)}")
 
