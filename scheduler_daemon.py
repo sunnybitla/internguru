@@ -8,9 +8,15 @@ import applier
 
 def main():
     print("Executing scheduled AI Job Applier daemon...")
+    user_id = 1
+    if len(sys.argv) > 1:
+        try:
+            user_id = int(sys.argv[1])
+        except ValueError:
+            pass
     try:
-        applied = applier.run_auto_apply_queue()
-        print(f"Scheduled run completed. Applied to {applied} jobs.")
+        applied = applier.run_auto_apply_queue(user_id)
+        print(f"Scheduled run completed for user {user_id}. Applied to {applied} jobs.")
     except Exception as e:
         print(f"Error during scheduled run: {e}")
 

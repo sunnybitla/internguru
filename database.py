@@ -15,10 +15,21 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Users table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password_hash TEXT,
+        salt TEXT
+    )
+    """)
+
     # Profile table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS profile (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE,
         name TEXT,
         email TEXT,
         phone TEXT,
@@ -31,7 +42,8 @@ def init_db():
         linkedin_api_key TEXT DEFAULT '',
         windows_daemon_enabled INTEGER DEFAULT 0,
         monday_time TEXT DEFAULT '09:00',
-        dry_run INTEGER DEFAULT 1
+        dry_run INTEGER DEFAULT 1,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
     
@@ -42,14 +54,10 @@ def init_db():
         cursor.execute("ALTER TABLE profile ADD COLUMN dry_run INTEGER DEFAULT 1")
     if 'linkedin_api_key' not in columns:
         cursor.execute("ALTER TABLE profile ADD COLUMN linkedin_api_key TEXT DEFAULT ''")
-    
-    # Insert default profile row if not exists
-    cursor.execute("SELECT COUNT(*) FROM profile")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("""
-        INSERT INTO profile (name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename, resume_text, gemini_api_key, linkedin_api_key, windows_daemon_enabled, monday_time, dry_run)
-        VALUES ('', '', '', '', '', '', '', '', '', '', 0, '09:00', 1)
-        """)
+    if 'user_id' not in columns:
+        cursor.execute("ALTER TABLE profile ADD COLUMN user_id INTEGER")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_user_id ON profile(user_id)")
+        cursor.execute("UPDATE profile SET user_id = 1 WHERE user_id IS NULL")
 
     # Jobs cache table
     cursor.execute("""
@@ -69,20 +77,42 @@ def init_db():
     """)
 
     # Apply queue table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS apply_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_id TEXT UNIQUE,
-        cover_letter TEXT,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (job_id) REFERENCES jobs_cache(id) ON DELETE CASCADE
-    )
-    """)
+    cursor.execute("PRAGMA table_info(apply_queue)")
+    q_info = cursor.fetchall()
+    q_columns = [col[1] for col in q_info] if q_info else []
+    if not q_columns or 'user_id' not in q_columns:
+        cursor.execute("DROP TABLE IF EXISTS apply_queue")
+        cursor.execute("""
+        CREATE TABLE apply_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            job_id TEXT,
+            cover_letter TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, job_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES jobs_cache(id) ON DELETE CASCADE
+        )
+        """)
+    else:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS apply_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            job_id TEXT,
+            cover_letter TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, job_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES jobs_cache(id) ON DELETE CASCADE
+        )
+        """)
 
     # Apply history table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS apply_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
         job_id TEXT,
         title TEXT,
         company TEXT,
@@ -90,25 +120,53 @@ def init_db():
         cover_letter TEXT,
         status TEXT, -- 'completed', 'failed', 'requires_manual'
         error_message TEXT,
-        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
+    cursor.execute("PRAGMA table_info(apply_history)")
+    h_columns = [col[1] for col in cursor.fetchall()]
+    if 'user_id' not in h_columns:
+        cursor.execute("ALTER TABLE apply_history ADD COLUMN user_id INTEGER DEFAULT 1")
+
+    # Insert default admin user if no users exist
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        import hashlib
+        import os
+        salt = os.urandom(16).hex()
+        password_hash = hashlib.sha256(("admin" + salt).encode('utf-8')).hexdigest()
+        cursor.execute("INSERT INTO users (id, username, password_hash, salt) VALUES (1, 'admin', ?, ?)", (password_hash, salt))
+        
+    # Insert default profile row for user 1 if not exists
+    cursor.execute("SELECT COUNT(*) FROM profile WHERE user_id = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+        INSERT INTO profile (user_id, name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename, resume_text, gemini_api_key, linkedin_api_key, windows_daemon_enabled, monday_time, dry_run)
+        VALUES (1, '', '', '', '', '', '', '', '', '', '', 0, '09:00', 1)
+        """)
 
     conn.commit()
     conn.close()
 
 # Profile Helpers
-def get_profile():
+def get_profile(user_id=1):
     conn = get_db_connection()
-    profile = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
+    profile = conn.execute("SELECT * FROM profile WHERE user_id = ?", (user_id,)).fetchone()
     conn.close()
     if profile:
         return dict(profile)
     return None
 
-def update_profile(name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename=None, resume_text=None, gemini_api_key=None, linkedin_api_key=None, windows_daemon_enabled=None, monday_time=None, dry_run=None):
+def update_profile(user_id, name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename=None, resume_text=None, gemini_api_key=None, linkedin_api_key=None, windows_daemon_enabled=None, monday_time=None, dry_run=None):
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Ensure profile row exists for this user_id
+    cursor.execute("SELECT COUNT(*) FROM profile WHERE user_id = ?", (user_id,))
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO profile (user_id) VALUES (?)", (user_id,))
+        conn.commit()
     
     # Dynamic update query
     updates = []
@@ -136,8 +194,8 @@ def update_profile(name, email, phone, linkedin_url, github_url, portfolio_url, 
             params.append(v)
             
     if updates:
-        params.append(1) # ID = 1
-        query = f"UPDATE profile SET {', '.join(updates)} WHERE id = ?"
+        params.append(user_id)
+        query = f"UPDATE profile SET {', '.join(updates)} WHERE user_id = ?"
         cursor.execute(query, params)
         conn.commit()
     conn.close()
@@ -195,11 +253,11 @@ def get_job_by_id(job_id):
     return dict(job) if job else None
 
 # Queue Helpers
-def add_to_queue(job_id, cover_letter=""):
+def add_to_queue(user_id, job_id, cover_letter=""):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT OR REPLACE INTO apply_queue (job_id, cover_letter) VALUES (?, ?)", (job_id, cover_letter))
+        cursor.execute("INSERT OR REPLACE INTO apply_queue (user_id, job_id, cover_letter) VALUES (?, ?, ?)", (user_id, job_id, cover_letter))
         conn.commit()
         success = True
     except Exception as e:
@@ -208,58 +266,109 @@ def add_to_queue(job_id, cover_letter=""):
     conn.close()
     return success
 
-def remove_from_queue(job_id):
+def remove_from_queue(user_id, job_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM apply_queue WHERE job_id = ?", (job_id,))
+    cursor.execute("DELETE FROM apply_queue WHERE user_id = ? AND job_id = ?", (user_id, job_id))
     conn.commit()
     conn.close()
 
-def get_queue():
+def get_queue(user_id):
     conn = get_db_connection()
     query = """
     SELECT q.id as queue_id, q.job_id, q.cover_letter, q.added_at, j.*
     FROM apply_queue q
     JOIN jobs_cache j ON q.job_id = j.id
+    WHERE q.user_id = ?
     ORDER BY q.added_at ASC
     """
-    queue_items = conn.execute(query).fetchall()
+    queue_items = conn.execute(query, (user_id,)).fetchall()
     conn.close()
     return [dict(item) for item in queue_items]
 
-def update_queue_cover_letter(job_id, cover_letter):
+def update_queue_cover_letter(user_id, job_id, cover_letter):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE apply_queue SET cover_letter = ? WHERE job_id = ?", (cover_letter, job_id))
+    cursor.execute("UPDATE apply_queue SET cover_letter = ? WHERE user_id = ? AND job_id = ?", (cover_letter, user_id, job_id))
     conn.commit()
     conn.close()
 
 # History Helpers
-def add_to_history(job_id, title, company, url, cover_letter, status, error_message=None):
+def add_to_history(user_id, job_id, title, company, url, cover_letter, status, error_message=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO apply_history (job_id, title, company, url, cover_letter, status, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (job_id, title, company, url, cover_letter, status, error_message))
+    INSERT INTO apply_history (user_id, job_id, title, company, url, cover_letter, status, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, job_id, title, company, url, cover_letter, status, error_message))
     
     # Once added to history, remove from the active queue
-    cursor.execute("DELETE FROM apply_queue WHERE job_id = ?", (job_id,))
+    cursor.execute("DELETE FROM apply_queue WHERE user_id = ? AND job_id = ?", (user_id, job_id))
     
     conn.commit()
     conn.close()
 
-def get_history():
+def get_history(user_id):
     conn = get_db_connection()
-    history = conn.execute("SELECT * FROM apply_history ORDER BY applied_at DESC").fetchall()
+    history = conn.execute("SELECT * FROM apply_history WHERE user_id = ? ORDER BY applied_at DESC", (user_id,)).fetchall()
     conn.close()
     return [dict(item) for item in history]
 
-def clear_history():
+def clear_history(user_id):
     conn = get_db_connection()
-    conn.execute("DELETE FROM apply_history")
+    conn.execute("DELETE FROM apply_history WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+# User Auth Helpers
+def get_user_by_username(username):
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    return dict(user) if user else None
+
+def get_user_by_id(user_id):
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(user) if user else None
+
+def create_user(username, password):
+    import hashlib
+    import os
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        salt = os.urandom(16).hex()
+        password_hash = hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
+        cursor.execute("INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)", (username, password_hash, salt))
+        user_id = cursor.lastrowid
+        
+        # Auto-create empty profile for new user
+        cursor.execute("""
+        INSERT INTO profile (user_id, name, email, phone, linkedin_url, github_url, portfolio_url, resume_filename, resume_text, gemini_api_key, linkedin_api_key, windows_daemon_enabled, monday_time, dry_run)
+        VALUES (?, '', '', '', '', '', '', '', '', '', '', 0, '09:00', 1)
+        """, (user_id,))
+        
+        conn.commit()
+        success = True
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        success = False
+        user_id = None
+    conn.close()
+    return success, user_id
+
+def authenticate_user(username, password):
+    import hashlib
+    user = get_user_by_username(username)
+    if not user:
+        return None
+    salt = user['salt']
+    password_hash = hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
+    if password_hash == user['password_hash']:
+        return user
+    return None
 
 def update_job_details(job_id, url, description):
     """

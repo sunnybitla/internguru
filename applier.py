@@ -269,23 +269,23 @@ def apply_to_job(profile, job, cover_letter):
     print("No standard ATS detected. Attempting automated LinkedIn/non-ATS submission...")
     return apply_linkedin(job, profile, cover_letter)
 
-def run_auto_apply_queue():
+def run_auto_apply_queue(user_id=1):
     """
-    Processes all items currently in the apply_queue database.
+    Processes all items currently in the apply_queue database for a specific user.
     Updates application history and logs.
     """
-    profile = database.get_profile()
+    profile = database.get_profile(user_id)
     if not profile or not profile.get('email'):
-        print("Profile is incomplete. Cannot run application queue.")
+        print(f"Profile is incomplete for user {user_id}. Cannot run application queue.")
         return 0
         
-    queue = database.get_queue()
+    queue = database.get_queue(user_id)
     if not queue:
-        print("Queue is empty. Nothing to apply to.")
+        print(f"Queue is empty for user {user_id}. Nothing to apply to.")
         return 0
         
     applied_count = 0
-    print(f"Starting auto-apply process for {len(queue)} jobs...")
+    print(f"Starting auto-apply process for user {user_id} ({len(queue)} jobs)...")
     
     for item in queue:
         job_id = item['job_id']
@@ -301,14 +301,15 @@ def run_auto_apply_queue():
         success, message = apply_to_job(profile, item, cover_letter)
         
         if success:
-            database.add_to_history(job_id, title, company, url, cover_letter, 'completed', message)
+            database.add_to_history(user_id, job_id, title, company, url, cover_letter, 'completed', message)
             applied_count += 1
-            print(f"Successfully applied to {title} at {company}")
+            print(f"Successfully applied to {title} at {company} (User {user_id})")
         elif message == "requires_manual":
-            database.add_to_history(job_id, title, company, url, cover_letter, 'requires_manual', "Non-standard job site. Cover letter pre-generated. Submit manually.")
-            print(f"Job requires manual submission: {title} at {company}")
+            database.add_to_history(user_id, job_id, title, company, url, cover_letter, 'requires_manual', "Non-standard job site. Cover letter pre-generated. Submit manually.")
+            print(f"Job requires manual submission: {title} at {company} (User {user_id})")
         else:
-            database.add_to_history(job_id, title, company, url, cover_letter, 'failed', message)
-            print(f"Failed to apply to {title} at {company}: {message}")
+            database.add_to_history(user_id, job_id, title, company, url, cover_letter, 'failed', message)
+            print(f"Failed to apply to {title} at {company} (User {user_id}): {message}")
             
     return applied_count
+

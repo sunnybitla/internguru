@@ -1,5 +1,7 @@
 // App State
 const state = {
+    token: localStorage.getItem('token') || null,
+    username: localStorage.getItem('username') || null,
     profile: null,
     jobs: [],
     queue: [],
@@ -8,41 +10,74 @@ const state = {
     activeQueueJobId: null
 };
 
+// Helper for authenticated requests
+function authFetch(url, options = {}) {
+    if (!options.headers) {
+        options.headers = {};
+    }
+    if (state.token) {
+        options.headers['Authorization'] = `Bearer ${state.token}`;
+    }
+    return fetch(url, options).then(r => {
+        if (r.status === 401) {
+            logout();
+            throw new Error("Session expired. Please log in again.");
+        }
+        return r.json();
+    });
+}
+
 // API Endpoints
 const API = {
-    getProfile: () => fetch('/api/profile').then(r => r.json()),
-    saveProfile: (formData) => fetch('/api/profile', { method: 'POST', body: formData }).then(r => r.json()),
+    register: (username, password) => fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    }).then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(data.detail || 'Registration failed');
+        return data;
+    })),
+    login: (username, password) => fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    }).then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(data.detail || 'Login failed');
+        return data;
+    })),
+    getProfile: () => authFetch('/api/profile'),
+    saveProfile: (formData) => authFetch('/api/profile', { method: 'POST', body: formData }),
     getJobs: (search = '', internship = null, sync = false) => {
         let url = `/api/jobs?sync=${sync}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (internship !== null) url += `&internship=${internship}`;
-        return fetch(url).then(r => r.json());
+        return authFetch(url);
     },
-    getQueue: () => fetch('/api/queue').then(r => r.json()),
-    addToQueue: (jobId) => fetch('/api/queue', {
+    getQueue: () => authFetch('/api/queue'),
+    addToQueue: (jobId) => authFetch('/api/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: jobId })
-    }).then(r => r.json()),
-    updateCoverLetter: (jobId, coverLetter) => fetch(`/api/queue/${jobId}/cover-letter`, {
+    }),
+    updateCoverLetter: (jobId, coverLetter) => authFetch(`/api/queue/${jobId}/cover-letter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cover_letter: coverLetter })
-    }).then(r => r.json()),
-    removeFromQueue: (jobId) => fetch(`/api/queue/${jobId}`, { method: 'DELETE' }).then(r => r.json()),
-    getHistory: () => fetch('/api/history').then(r => r.json()),
-    clearHistory: () => fetch('/api/history/clear', { method: 'POST' }).then(r => r.json()),
-    triggerRun: () => fetch('/api/trigger-run', { method: 'POST' }).then(r => r.json()),
-    toggleDaemon: (enabled) => fetch('/api/toggle-daemon', {
+    }),
+    removeFromQueue: (jobId) => authFetch(`/api/queue/${jobId}`, { method: 'DELETE' }),
+    getHistory: () => authFetch('/api/history'),
+    clearHistory: () => authFetch('/api/history/clear', { method: 'POST' }),
+    triggerRun: () => authFetch('/api/trigger-run', { method: 'POST' }),
+    toggleDaemon: (enabled) => authFetch('/api/toggle-daemon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
-    }).then(r => r.json()),
-    toggleDryRun: (enabled) => fetch('/api/toggle-dry-run', {
+    }),
+    toggleDryRun: (enabled) => authFetch('/api/toggle-dry-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
-    }).then(r => r.json())
+    })
 };
 
 // UI Elements
@@ -125,7 +160,18 @@ const DOM = {
     btnCloseModal: document.getElementById('btn-close-modal'),
     
     // Toast
-    toast: document.getElementById('toast')
+    toast: document.getElementById('toast'),
+    
+    // Auth Elements
+    authOverlay: document.getElementById('auth-overlay'),
+    authSubtitle: document.getElementById('auth-subtitle'),
+    authForm: document.getElementById('auth-form'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    btnAuthSubmit: document.getElementById('btn-auth-submit'),
+    authToggleText: document.getElementById('auth-toggle-text'),
+    authToggleBtn: document.getElementById('auth-toggle-btn'),
+    btnLogout: document.getElementById('btn-logout')
 };
 
 // Show Toast Alert
@@ -142,8 +188,40 @@ function showToast(message, isError = false) {
     }, 3000);
 }
 
+// Auth State Verification & Actions
+function checkAuthState() {
+    if (state.token) {
+        DOM.authOverlay.classList.add('hidden');
+        return true;
+    } else {
+        DOM.authOverlay.classList.remove('hidden');
+        DOM.authUsername.value = '';
+        DOM.authPassword.value = '';
+        return false;
+    }
+}
+
+function logout() {
+    state.token = null;
+    state.username = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    
+    state.profile = null;
+    state.jobs = [];
+    state.queue = [];
+    state.history = [];
+    state.selectedJob = null;
+    state.activeQueueJobId = null;
+    
+    checkAuthState();
+}
+
 // Router
 function routeSPA() {
+    if (!checkAuthState()) {
+        return;
+    }
     const hash = window.location.hash || '#dashboard';
     
     // Deactivate all nav links and pages
@@ -836,12 +914,73 @@ window.addEventListener('click', (e) => {
     }
 });
 
+// Auth View Toggle & Form Handling
+let authMode = 'login';
+
+DOM.authToggleBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (authMode === 'login') {
+        authMode = 'register';
+        DOM.authSubtitle.innerText = 'Create a new account to start automated job hunting';
+        DOM.btnAuthSubmit.innerHTML = `<i class="fa-solid fa-user-plus"></i> Sign Up`;
+        DOM.authToggleText.innerText = 'Already have an account?';
+        DOM.authToggleBtn.innerText = 'Sign In';
+    } else {
+        authMode = 'login';
+        DOM.authSubtitle.innerText = 'Sign in to manage your automated job search';
+        DOM.btnAuthSubmit.innerHTML = `<i class="fa-solid fa-sign-in-alt"></i> Sign In`;
+        DOM.authToggleText.innerText = "Don't have an account?";
+        DOM.authToggleBtn.innerText = 'Sign Up';
+    }
+});
+
+DOM.authForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const username = DOM.authUsername.value.trim();
+    const password = DOM.authPassword.value;
+    
+    DOM.btnAuthSubmit.disabled = true;
+    const submitText = DOM.btnAuthSubmit.innerHTML;
+    DOM.btnAuthSubmit.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
+    
+    const authPromise = authMode === 'login' 
+        ? API.login(username, password)
+        : API.register(username, password);
+        
+    authPromise.then(res => {
+        if (res.status === 'success') {
+            state.token = res.token;
+            state.username = res.username;
+            localStorage.setItem('token', res.token);
+            localStorage.setItem('username', res.username);
+            
+            showToast(authMode === 'login' ? "Welcome back!" : "Account created successfully!");
+            checkAuthState();
+            routeSPA();
+        } else {
+            showToast(res.message || "Authentication failed.", true);
+        }
+    }).catch(err => {
+        showToast(err.message || "An error occurred during authentication.", true);
+    }).finally(() => {
+        DOM.btnAuthSubmit.disabled = false;
+        DOM.btnAuthSubmit.innerHTML = submitText;
+    });
+});
+
+DOM.btnLogout.addEventListener('click', () => {
+    logout();
+    showToast("Logged out successfully!");
+});
+
 // Startup Helpers
 window.addEventListener('hashchange', routeSPA);
 window.addEventListener('DOMContentLoaded', () => {
     routeSPA();
-    // Load initial counts for badge
-    API.getQueue().then(q => DOM.queueBadge.innerText = q.length);
+    // Load initial counts for badge if authenticated
+    if (state.token) {
+        API.getQueue().then(q => DOM.queueBadge.innerText = q.length).catch(() => {});
+    }
 });
 
 // Utility functions

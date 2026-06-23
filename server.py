@@ -2,9 +2,14 @@ import os
 import subprocess
 import shutil
 import platform
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import hmac
+import hashlib
+import base64
+import time
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -16,6 +21,46 @@ import applier
 
 app = FastAPI(title="AI Job Applier Agent")
 
+SECRET_KEY = "super-secret-key-job-agent"
+security = HTTPBearer()
+
+def create_token(user_id: int) -> str:
+    timestamp = int(time.time())
+    payload = f"{user_id}:{timestamp}"
+    signature = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    token = base64.b64encode(f"{payload}:{signature}".encode()).decode()
+    return token
+
+def verify_token(token: str) -> Optional[int]:
+    try:
+        decoded = base64.b64decode(token.encode()).decode()
+        parts = decoded.split(':')
+        if len(parts) != 3:
+            return None
+        user_id_str, timestamp_str, signature = parts
+        user_id = int(user_id_str)
+        timestamp = int(timestamp_str)
+        
+        if time.time() - timestamp > 7 * 24 * 3600:
+            return None
+            
+        expected_sig = hmac.new(SECRET_KEY.encode(), f"{user_id_str}:{timestamp_str}".encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(expected_sig, signature):
+            return user_id
+    except Exception:
+        return None
+    return None
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    user_id = verify_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token or session expired.")
+    user = database.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found.")
+    return user
+
 # Process-level scheduler
 scheduler = BackgroundScheduler()
 
@@ -23,27 +68,28 @@ def run_monday_apply():
     print("Process-level scheduler running Monday Apply...")
     applier.run_auto_apply_queue()
 
-def update_process_scheduler():
+def update_process_scheduler(user_id=1):
     """
     Updates the process-level cron job based on settings in the DB.
     """
-    profile = database.get_profile()
+    profile = database.get_profile(user_id)
     if not profile:
         return
         
+    job_name = f'monday_apply_{user_id}'
     # Remove existing job if it exists
-    if scheduler.get_job('monday_apply'):
-        scheduler.remove_job('monday_apply')
+    if scheduler.get_job(job_name):
+        scheduler.remove_job(job_name)
         
     time_str = profile.get('monday_time', '09:00')
     try:
         hour, minute = map(int, time_str.split(':'))
         scheduler.add_job(
-            run_monday_apply,
+            lambda: applier.run_auto_apply_queue(user_id),
             CronTrigger(day_of_week='mon', hour=hour, minute=minute),
-            id='monday_apply'
+            id=job_name
         )
-        print(f"Process scheduler set for Monday at {hour:02d}:{minute:02d}")
+        print(f"Process scheduler for user {user_id} set for Monday at {hour:02d}:{minute:02d}")
     except Exception as e:
         print(f"Error setting process scheduler: {e}")
 
@@ -82,10 +128,40 @@ class DaemonToggle(BaseModel):
 class DryRunToggle(BaseModel):
     enabled: bool
 
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/auth/register")
+def register(req: AuthRequest):
+    if len(req.username.strip()) < 3 or len(req.password.strip()) < 4:
+        raise HTTPException(status_code=400, detail="Username must be >= 3 characters, password >= 4 characters.")
+    
+    existing = database.get_user_by_username(req.username)
+    if existing:
+        raise HTTPException(status_code=400, detail="Username is already taken.")
+        
+    success, user_id = database.create_user(req.username, req.password)
+    if success:
+        token = create_token(user_id)
+        return {"status": "success", "token": token, "username": req.username}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create user account.")
+
+@app.post("/api/auth/login")
+def login(req: AuthRequest):
+    user = database.authenticate_user(req.username, req.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid username or password.")
+        
+    token = create_token(user['id'])
+    return {"status": "success", "token": token, "username": req.username}
+
 # API Routes
 @app.get("/api/profile")
-def get_profile_api():
-    profile = database.get_profile()
+def get_profile_api(current_user = Depends(get_current_user)):
+    user_id = current_user['id']
+    profile = database.get_profile(user_id)
     if profile:
         # Mask API Keys for security
         p_dict = dict(profile)
@@ -107,9 +183,11 @@ async def update_profile_api(
     gemini_api_key: str = Form(""),
     linkedin_api_key: str = Form(""),
     monday_time: str = Form("09:00"),
-    resume: Optional[UploadFile] = File(None)
+    resume: Optional[UploadFile] = File(None),
+    current_user = Depends(get_current_user)
 ):
-    profile = database.get_profile()
+    user_id = current_user['id']
+    profile = database.get_profile(user_id)
     current_key = profile.get('gemini_api_key', '') if profile else ''
     current_linkedin_key = profile.get('linkedin_api_key', '') if profile else ''
     
@@ -122,8 +200,8 @@ async def update_profile_api(
     if linkedin_api_key.startswith("ln-..."):
         linkedin_key_to_save = current_linkedin_key
 
-    resume_filename = None
-    resume_text = None
+    resume_filename = profile.get('resume_filename') if profile else None
+    resume_text = profile.get('resume_text') if profile else None
     
     if resume and resume.filename:
         # Save resume file locally
@@ -131,7 +209,7 @@ async def update_profile_api(
         if file_ext.lower() != '.pdf':
             raise HTTPException(status_code=400, detail="Only PDF resumes are supported.")
             
-        saved_name = "resume.pdf"
+        saved_name = f"resume_{user_id}.pdf"
         data_dir = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
         target_path = os.path.join(data_dir, saved_name)
         
@@ -146,6 +224,7 @@ async def update_profile_api(
             resume_text = parsed.get('text')
             
     database.update_profile(
+        user_id=user_id,
         name=name,
         email=email,
         phone=phone,
@@ -159,11 +238,11 @@ async def update_profile_api(
         monday_time=monday_time
     )
     
-    update_process_scheduler()
+    update_process_scheduler(user_id)
     return {"status": "success", "message": "Profile updated successfully"}
 
 @app.get("/api/jobs")
-def get_jobs(search: Optional[str] = "", internship: Optional[bool] = None, sync: Optional[bool] = False):
+def get_jobs(search: Optional[str] = "", internship: Optional[bool] = None, sync: Optional[bool] = False, current_user = Depends(get_current_user)):
     if sync:
         try:
             new_count = scraper.sync_jobs()
@@ -175,16 +254,17 @@ def get_jobs(search: Optional[str] = "", internship: Optional[bool] = None, sync
     return jobs
 
 @app.get("/api/queue")
-def get_queue_api():
-    return database.get_queue()
+def get_queue_api(current_user = Depends(get_current_user)):
+    return database.get_queue(current_user['id'])
 
 @app.post("/api/queue")
-def add_to_queue_api(item: QueueItem):
+def add_to_queue_api(item: QueueItem, current_user = Depends(get_current_user)):
+    user_id = current_user['id']
     job = database.get_job_by_id(item.job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found in cache.")
         
-    profile = database.get_profile()
+    profile = database.get_profile(user_id)
     
     # 1. Resolve LinkedIn job details lazily if this is a LinkedIn job
     if job['url'].startswith("https://www.linkedin.com/") or job['url'].startswith("https://linkedin.com/") or "linkedin_" in job['id']:
@@ -204,40 +284,42 @@ def add_to_queue_api(item: QueueItem):
     if not cover_letter:
         cover_letter = applier.generate_cover_letter(profile, job['title'], job['company'], job['description'])
         
-    success = database.add_to_queue(item.job_id, cover_letter)
+    success = database.add_to_queue(user_id, item.job_id, cover_letter)
     if success:
         return {"status": "success", "cover_letter": cover_letter}
     else:
         raise HTTPException(status_code=500, detail="Failed to add to queue.")
 
 @app.post("/api/queue/{job_id}/cover-letter")
-def update_cover_letter(job_id: str, request: UpdateCoverLetterRequest):
-    database.update_queue_cover_letter(job_id, request.cover_letter)
+def update_cover_letter(job_id: str, request: UpdateCoverLetterRequest, current_user = Depends(get_current_user)):
+    database.update_queue_cover_letter(current_user['id'], job_id, request.cover_letter)
     return {"status": "success"}
 
 @app.delete("/api/queue/{job_id}")
-def remove_from_queue_api(job_id: str):
-    database.remove_from_queue(job_id)
+def remove_from_queue_api(job_id: str, current_user = Depends(get_current_user)):
+    database.remove_from_queue(current_user['id'], job_id)
     return {"status": "success"}
 
 @app.get("/api/history")
-def get_history_api():
-    return database.get_history()
+def get_history_api(current_user = Depends(get_current_user)):
+    return database.get_history(current_user['id'])
 
 @app.post("/api/history/clear")
-def clear_history_api():
-    database.clear_history()
+def clear_history_api(current_user = Depends(get_current_user)):
+    database.clear_history(current_user['id'])
     return {"status": "success"}
 
 @app.post("/api/trigger-run")
-def trigger_run_api():
-    applied = applier.run_auto_apply_queue()
+def trigger_run_api(current_user = Depends(get_current_user)):
+    applied = applier.run_auto_apply_queue(current_user['id'])
     return {"status": "success", "applied": applied}
 
 @app.post("/api/toggle-dry-run")
-def toggle_dry_run_api(toggle: DryRunToggle):
+def toggle_dry_run_api(toggle: DryRunToggle, current_user = Depends(get_current_user)):
+    user_id = current_user['id']
     try:
         database.update_profile(
+            user_id=user_id,
             name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None,
             dry_run=1 if toggle.enabled else 0
         )
@@ -246,14 +328,15 @@ def toggle_dry_run_api(toggle: DryRunToggle):
         raise HTTPException(status_code=500, detail=f"Failed to update Dry Run setting: {str(e)}")
 
 @app.post("/api/toggle-daemon")
-def toggle_daemon_api(toggle: DaemonToggle):
+def toggle_daemon_api(toggle: DaemonToggle, current_user = Depends(get_current_user)):
+    user_id = current_user['id']
     if platform.system() != 'Windows':
         raise HTTPException(
             status_code=400, 
             detail="Windows Task Scheduler is only supported on Windows. On cloud/Linux deployments, the process-level background scheduler will run automatically while the server is active."
         )
         
-    profile = database.get_profile()
+    profile = database.get_profile(user_id)
     if not profile:
         raise HTTPException(status_code=400, detail="Profile not configured")
         
@@ -261,7 +344,7 @@ def toggle_daemon_api(toggle: DaemonToggle):
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scheduler_daemon.py")
     venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "Scripts", "python.exe")
     
-    task_name = "AI_Job_Applier"
+    task_name = f"AI_Job_Applier_{user_id}"
     
     if toggle.enabled:
         # Check if venv python exists
@@ -269,11 +352,11 @@ def toggle_daemon_api(toggle: DaemonToggle):
             # Fall back to system python if venv python doesn't exist yet (though it should)
             venv_python = "python"
             
-        command = f'schtasks /create /tn "{task_name}" /tr "\'{venv_python}\' \'{script_path}\'" /sc weekly /d MON /st {time_str} /f'
+        command = f'schtasks /create /tn "{task_name}" /tr "\'{venv_python}\' \'{script_path}\' {user_id}" /sc weekly /d MON /st {time_str} /f'
         try:
             # Run schtasks via PowerShell/CMD
             result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True, check=True)
-            database.update_profile(name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=1)
+            database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=1)
             return {"status": "success", "message": "Windows Task Scheduled successfully", "output": result.stdout}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to register Windows Scheduled Task: {str(e)}")
@@ -281,7 +364,7 @@ def toggle_daemon_api(toggle: DaemonToggle):
         command = f'schtasks /delete /tn "{task_name}" /f'
         try:
             result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True)
-            database.update_profile(name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=0)
+            database.update_profile(user_id=user_id, name=None, email=None, phone=None, linkedin_url=None, github_url=None, portfolio_url=None, windows_daemon_enabled=0)
             return {"status": "success", "message": "Windows Task unregistered successfully", "output": result.stdout}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to unregister Windows Scheduled Task: {str(e)}")

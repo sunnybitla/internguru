@@ -50,6 +50,9 @@
                     <span class="status-dot online"></span>
                     <span>Agent Daemon Ready</span>
                 </div>
+                <button class="btn-logout" id="btn-logout">
+                    <i class="fa-solid fa-sign-out-alt"></i> Logout
+                </button>
             </div>
         </aside>
 
@@ -378,6 +381,43 @@
                 <button class="btn btn-primary" id="modal-btn-queue">
                     <i class="fa-solid fa-clock"></i> Queue for Monday Apply
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Overlay (Login / Signup) -->
+    <div class="auth-overlay" id="auth-overlay">
+        <div class="auth-card">
+            <div class="auth-header">
+                <i class="fa-solid fa-robot-astronaut auth-logo"></i>
+                <h2>JobAgent<span>.ai</span></h2>
+                <p id="auth-subtitle">Sign in to manage your automated job search</p>
+            </div>
+            
+            <form id="auth-form" class="auth-form">
+                <div class="form-group">
+                    <label for="auth-username">Username</label>
+                    <div class="input-with-icon">
+                        <i class="fa-solid fa-user"></i>
+                        <input type="text" id="auth-username" required placeholder="Enter username">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <div class="input-with-icon">
+                        <i class="fa-solid fa-lock"></i>
+                        <input type="password" id="auth-password" required placeholder="Enter password">
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary btn-block" id="btn-auth-submit">
+                    <i class="fa-solid fa-sign-in-alt"></i> Sign In
+                </button>
+            </form>
+            
+            <div class="auth-footer">
+                <span id="auth-toggle-text">Don't have an account?</span>
+                <a href="#" id="auth-toggle-btn" class="auth-toggle-link">Sign Up</a>
             </div>
         </div>
     </div>

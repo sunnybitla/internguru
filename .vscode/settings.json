@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "C:/Users/Sunny/OneDrive/Desktop/automation/.venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+        "C:/Users/Sunny/OneDrive/Desktop/automation/.venv/Lib/site-packages"
+    ]
+}
