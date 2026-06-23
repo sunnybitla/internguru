@@ -2,7 +2,20 @@ import sqlite3
 import os
 import json
 
+# Load env variables from .env file if it exists
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#"):
+                _key_val = _line.split("=", 1)
+                if len(_key_val) == 2:
+                    _k, _v = _key_val
+                    os.environ[_k.strip()] = _v.strip().strip("'\"")
+
 DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_FILE = os.path.join(DATA_DIR, "data.db")
 

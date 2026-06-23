@@ -133,13 +133,15 @@ class AuthRequest(BaseModel):
     username: str
     password: str
 
+DEFAULT_GOOGLE_CLIENT_ID = "283615882382-ao757eugoh37v14oumsnbdgr8d1rodm9.apps.googleusercontent.com"
+
 class GoogleAuthRequest(BaseModel):
     credential: str
 
 @app.get("/api/auth/config")
 def get_auth_config():
     return {
-        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "100000000000-placeholder.apps.googleusercontent.com")
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", DEFAULT_GOOGLE_CLIENT_ID)
     }
 
 @app.post("/api/auth/register")
@@ -181,8 +183,8 @@ def google_auth(req: GoogleAuthRequest):
         
     token_data = response.json()
     
-    # Verify the audience (client_id) if configured
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    # Verify the audience (client_id)
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID", DEFAULT_GOOGLE_CLIENT_ID)
     if google_client_id:
         token_aud = token_data.get("aud", "")
         if token_aud != google_client_id:
