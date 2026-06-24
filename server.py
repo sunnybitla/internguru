@@ -1,4 +1,21 @@
 import os
+
+# Load environment variables from .env if it exists
+def load_env_file():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    parts = line.split("=", 1)
+                    if len(parts) == 2:
+                        key, val = parts
+                        key = key.strip()
+                        val = val.strip().strip("'\"")
+                        os.environ[key] = val
+
+load_env_file()
 import subprocess
 import shutil
 import platform
@@ -6,9 +23,9 @@ import hmac
 import hashlib
 import base64
 import time
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
@@ -226,6 +243,146 @@ def google_auth(req: GoogleAuthRequest):
     # Generate app JWT session token
     token = create_token(user_id)
     return {"status": "success", "token": token, "username": username}
+
+import urllib.parse
+
+@app.get("/api/auth/linkedin/url")
+def get_linkedin_auth_url(request: Request, current_user = Depends(get_current_user)):
+    client_id = os.getenv("LINKEDIN_CLIENT_ID", "77u9vy91u0ua5n")
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", f"{base_url}/api/auth/linkedin/callback")
+    state = f"user_{current_user['id']}"
+    url = f"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id={client_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&state={state}&scope=openid%20profile%20email"
+    return {"url": url}
+
+@app.get("/api/auth/linkedin/url-login")
+def get_linkedin_auth_url_login(request: Request):
+    client_id = os.getenv("LINKEDIN_CLIENT_ID", "77u9vy91u0ua5n")
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", f"{base_url}/api/auth/linkedin/callback")
+    state = "login"
+    url = f"https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id={client_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&state={state}&scope=openid%20profile%20email"
+    return {"url": url}
+
+@app.get("/api/auth/linkedin/callback")
+def linkedin_callback(request: Request, code: str = None, state: str = None, error: str = None, error_description: str = None):
+    if error or not code:
+        err_msg = error_description or error or "Authorization code missing"
+        return HTMLResponse(f"<h3>LinkedIn Authentication Failed</h3><p>{err_msg}</p><a href='/'>Go back to Dashboard</a>")
+        
+    client_id = os.getenv("LINKEDIN_CLIENT_ID", "77u9vy91u0ua5n")
+    client_secret = os.getenv("LINKEDIN_CLIENT_SECRET", "WPL_AP1.gMj4oEkKwe9S47H5.iA76PA==")
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = os.getenv("LINKEDIN_REDIRECT_URI", f"{base_url}/api/auth/linkedin/callback")
+    
+    token_url = "https://www.linkedin.com/oauth/v2/accessToken"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret
+    }
+    
+    try:
+        res = requests.post(token_url, data=data, headers=headers, timeout=15)
+        if res.status_code != 200:
+            return HTMLResponse(f"<h3>LinkedIn Authentication Failed</h3><p>Token exchange failed: {res.text}</p><a href='/'>Go back to Dashboard</a>")
+            
+        token_info = res.json()
+        access_token = token_info.get("access_token")
+        if not access_token:
+            return HTMLResponse("<h3>LinkedIn Authentication Failed</h3><p>No access token returned.</p><a href='/'>Go back to Dashboard</a>")
+            
+        userinfo_url = "https://api.linkedin.com/v2/userinfo"
+        userinfo_headers = {"Authorization": f"Bearer {access_token}"}
+        user_res = requests.get(userinfo_url, headers=userinfo_headers, timeout=15)
+        if user_res.status_code != 200:
+            return HTMLResponse(f"<h3>LinkedIn Authentication Failed</h3><p>Could not fetch user profile: {user_res.text}</p><a href='/'>Go back to Dashboard</a>")
+            
+        user_data = user_res.json()
+        linkedin_id = user_data.get("sub")
+        name = user_data.get("name")
+        email = user_data.get("email")
+        
+        if not linkedin_id:
+            return HTMLResponse("<h3>LinkedIn Authentication Failed</h3><p>LinkedIn ID (sub) missing from profile details.</p><a href='/'>Go back to Dashboard</a>")
+            
+        vanity_name = None
+        try:
+            vanity_url = "https://api.linkedin.com/v2/me?projection=(vanityName)"
+            vanity_res = requests.get(vanity_url, headers=userinfo_headers, timeout=10)
+            if vanity_res.status_code == 200:
+                vanity_name = vanity_res.json().get("vanityName")
+        except Exception as ex:
+            print(f"Warning: Failed to fetch vanityName: {ex}")
+            
+        linkedin_url = f"https://www.linkedin.com/in/{vanity_name}" if vanity_name else ""
+        
+        if state and state.startswith("user_"):
+            user_id = int(state.split("_")[1])
+            profile = database.get_profile(user_id)
+            existing_name = profile.get('name') if profile else ""
+            existing_email = profile.get('email') if profile else ""
+            existing_phone = profile.get('phone') if profile else ""
+            existing_github = profile.get('github_url') if profile else ""
+            existing_portfolio = profile.get('portfolio_url') if profile else ""
+            existing_linkedin_url = profile.get('linkedin_url') if profile else ""
+            
+            database.update_profile(
+                user_id=user_id,
+                name=name or existing_name,
+                email=email or existing_email,
+                phone=existing_phone,
+                linkedin_url=linkedin_url or existing_linkedin_url,
+                github_url=existing_github,
+                portfolio_url=existing_portfolio,
+                linkedin_api_key=access_token
+            )
+            return RedirectResponse(url=f"{base_url}/#settings?status=linkedin_connected")
+            
+        else:
+            username = f"linkedin:{linkedin_id}"
+            user = database.get_user_by_username(username)
+            
+            if not user:
+                import secrets
+                random_password = secrets.token_hex(16)
+                success, user_id = database.create_user(username, random_password)
+                if not success:
+                    return HTMLResponse("<h3>LinkedIn Authentication Failed</h3><p>Could not register user account.</p><a href='/'>Go back to Dashboard</a>")
+                
+                database.update_profile(
+                    user_id=user_id,
+                    name=name,
+                    email=email,
+                    phone="",
+                    linkedin_url=linkedin_url,
+                    github_url="",
+                    portfolio_url="",
+                    linkedin_api_key=access_token
+                )
+            else:
+                user_id = user['id']
+                profile = database.get_profile(user_id)
+                database.update_profile(
+                    user_id=user_id,
+                    name=name or (profile.get('name') if profile else None),
+                    email=email or (profile.get('email') if profile else None),
+                    phone=profile.get('phone') if profile else None,
+                    linkedin_url=linkedin_url or (profile.get('linkedin_url') if profile else None),
+                    github_url=profile.get('github_url') if profile else None,
+                    portfolio_url=profile.get('portfolio_url') if profile else None,
+                    linkedin_api_key=access_token
+                )
+                
+            app_token = create_token(user_id)
+            encoded_username = urllib.parse.quote(username)
+            return RedirectResponse(url=f"{base_url}/#login?token={app_token}&username={encoded_username}")
+            
+    except Exception as e:
+        return HTMLResponse(f"<h3>LinkedIn Authentication Failed</h3><p>An unexpected error occurred: {str(e)}</p><a href='/'>Go back to Dashboard</a>")
 
 # API Routes
 @app.get("/api/profile")

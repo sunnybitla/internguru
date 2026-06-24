@@ -143,6 +143,8 @@ const DOM = {
     profilePortfolio: document.getElementById('profile-portfolio'),
     profileGeminiKey: document.getElementById('profile-gemini-key'),
     profileLinkedinKey: document.getElementById('profile-linkedin-key'),
+    btnLinkedinConnect: document.getElementById('btn-linkedin-connect'),
+    btnLinkedinLogin: document.getElementById('btn-linkedin-login'),
     resumeDropzone: document.getElementById('resume-dropzone'),
     resumeFileInput: document.getElementById('resume-file-input'),
     resumeFileInfo: document.getElementById('resume-file-info'),
@@ -228,10 +230,45 @@ function logout() {
 
 // Router
 function routeSPA() {
+    let hash = window.location.hash || '#dashboard';
+    
+    // Parse query params from hash if present
+    let queryParams = {};
+    const qIndex = hash.indexOf('?');
+    if (qIndex !== -1) {
+        const queryString = hash.substring(qIndex + 1);
+        hash = hash.substring(0, qIndex); // strip query params
+        
+        const params = new URLSearchParams(queryString);
+        for (const [key, value] of params.entries()) {
+            queryParams[key] = value;
+        }
+    }
+    
+    // Handle login callback from URL if present BEFORE checkAuthState()
+    if (hash === '#login' && queryParams.token && queryParams.username) {
+        state.token = queryParams.token;
+        state.username = decodeURIComponent(queryParams.username);
+        localStorage.setItem('token', queryParams.token);
+        localStorage.setItem('username', state.username);
+        
+        // Remove token from URL so it doesn't linger
+        window.history.replaceState(null, null, ' ');
+        showToast("Logged in with LinkedIn successfully!");
+        
+        // Fallback to dashboard
+        hash = '#dashboard';
+    }
+    
+    // Handle linkedin_connected status
+    if (hash === '#settings' && queryParams.status === 'linkedin_connected') {
+        window.history.replaceState(null, null, '#settings');
+        showToast("LinkedIn account connected successfully!");
+    }
+    
     if (!checkAuthState()) {
         return;
     }
-    const hash = window.location.hash || '#dashboard';
     
     // Deactivate all nav links and pages
     DOM.navLinks.forEach(link => link.classList.remove('active'));
@@ -566,6 +603,16 @@ function loadSettings() {
             DOM.profileGeminiKey.value = profile.gemini_api_key || '';
             DOM.profileLinkedinKey.value = profile.linkedin_api_key || '';
             DOM.scheduleTime.value = profile.monday_time || '09:00';
+            
+            // Toggle linkedin oauth badge
+            const linkedinOauthBadge = document.getElementById('linkedin-oauth-badge');
+            if (linkedinOauthBadge) {
+                if (profile.linkedin_api_key) {
+                    linkedinOauthBadge.style.display = 'inline-block';
+                } else {
+                    linkedinOauthBadge.style.display = 'none';
+                }
+            }
             
             // Update file display info
             if (profile.resume_filename) {
@@ -982,6 +1029,36 @@ DOM.btnLogout.addEventListener('click', () => {
     showToast("Logged out successfully!");
 });
 
+// LinkedIn OAuth Authentication
+if (DOM.btnLinkedinLogin) {
+    DOM.btnLinkedinLogin.addEventListener('click', () => {
+        fetch('/api/auth/linkedin/url-login')
+            .then(r => r.json())
+            .then(data => {
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    showToast("Failed to retrieve LinkedIn login URL.", true);
+                }
+            })
+            .catch(err => showToast("Error: " + err, true));
+    });
+}
+
+if (DOM.btnLinkedinConnect) {
+    DOM.btnLinkedinConnect.addEventListener('click', () => {
+        authFetch('/api/auth/linkedin/url')
+            .then(data => {
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    showToast("Failed to retrieve LinkedIn auth URL.", true);
+                }
+            })
+            .catch(err => showToast("Error: " + err, true));
+    });
+}
+
 // Google Credential Callback
 function handleGoogleCredentialResponse(response) {
     if (!response.credential) return;
@@ -1019,15 +1096,22 @@ window.addEventListener('DOMContentLoaded', () => {
     // Fetch auth config and initialize Google Sign-In
     API.getAuthConfig().then(config => {
         const btnContainer = document.getElementById("google-signin-btn-container");
-        if (config.google_client_id && typeof google !== 'undefined' && btnContainer) {
-            google.accounts.id.initialize({
-                client_id: config.google_client_id,
-                callback: handleGoogleCredentialResponse
-            });
-            google.accounts.id.renderButton(
-                btnContainer,
-                { theme: "outline", size: "large", width: 280, text: "signin_with" }
-            );
+        if (config.google_client_id && btnContainer) {
+            const initGoogle = () => {
+                if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+                    google.accounts.id.initialize({
+                        client_id: config.google_client_id,
+                        callback: handleGoogleCredentialResponse
+                    });
+                    google.accounts.id.renderButton(
+                        btnContainer,
+                        { theme: "outline", size: "large", width: 280, text: "signin_with" }
+                    );
+                } else {
+                    setTimeout(initGoogle, 100);
+                }
+            };
+            initGoogle();
         }
     }).catch(err => console.error("Error loading auth config:", err));
     
